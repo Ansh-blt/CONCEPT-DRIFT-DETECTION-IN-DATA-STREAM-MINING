@@ -1,9 +1,7 @@
 services:
   - type: web
     name: concept-drift-detection
-    runtime: python
-    buildCommand: curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y && export PATH="$HOME/.cargo/bin:$PATH" && pip install -r requirements.txt
-    startCommand: python app.py
+    runtime: docker
     envVars:
       - key: PYTHON_VERSION
         value: 3.11.0
