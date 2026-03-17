@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Real-Time Drift Analysis Dashboard</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Real-Time Data Drift Analysis</h1>
+            <p>Batch-based drift detection with ADWIN, Page-Hinkley, and KSWIN algorithms</p>
+        </header>
+
+        <div class="control-panel">
+            <h2>Configuration Panel</h2>
+            
+            <div class="form-grid">
+                <div class="form-group">
+                    <label for="n_features">Number of Features:</label>
+                    <input type="number" id="n_features" value="2" min="1" max="10">
+                </div>
+
+                <div class="form-group">
+                    <label for="n_classes">Number of Classes:</label>
+                    <input type="number" id="n_classes" value="3" min="2" max="10">
+                </div>
+
+                <div class="form-group">
+                    <label for="n_samples">Number of Samples:</label>
+                    <input type="number" id="n_samples" value="1000" min="20" max="10000">
+                </div>
+
+                <div class="form-group">
+                    <label for="drift_point">Drift Point:</label>
+                    <input type="number" id="drift_point" value="400" min="0">
+                </div>
+
+                <div class="form-group">
+                    <label for="drift_width">Drift Width:</label>
+                    <input type="number" id="drift_width" value="200" min="10">
+                </div>
+
+                <div class="form-group">
+                    <label for="drift_type">Drift Type:</label>
+                    <select id="drift_type">
+                        <option value="sudden">Sudden</option>
+                        <option value="gradual">Gradual</option>
+                        <option value="incremental">Incremental</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="locality">Locality:</label>
+                    <select id="locality">
+                        <option value="single_local">Single-Class Local</option>
+                        <option value="single_global">Single-Class Global</option>
+                        <option value="multi_local" selected>Multi-Class Local</option>
+                        <option value="multi_global">Multi-Class Global</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label for="difficulty">Drift Pattern:</label>
+                    <select id="difficulty">
+                        <option value="swap_cluster" selected>Swap Cluster</option>
+                        <option value="emerging_cluster">Emerging Cluster</option>
+                        <option value="moving_cluster">Moving Cluster</option>
+                        <option value="splitting_cluster">Splitting Cluster</option>
+                        <option value="merging_cluster">Merging Cluster</option>
+                        <option value="rotating_cluster">Rotating Cluster</option>
+                        <option value="expanding_cluster">Expanding Cluster</option>
+                        <option value="shrinking_cluster">Shrinking Cluster</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="button-group">
+                <button id="generateBtn" class="btn btn-primary">Generate Dataset</button>
+                <button id="analyzeBtn" class="btn btn-success" disabled>Analyze Drift</button>
+            </div>
+
+            <div class="csv-upload-section">
+                <h3>Insert Data (CSV File only Completly plutonicly)</h3>
+                <div class="upload-container">
+                    <input type="file" id="csvFileInput" accept=".csv" style="display: none;">
+                    <button id="uploadCsvBtn" class="btn btn-secondary">Choose CSV File</button>
+                    <span id="fileName" class="file-name"></span>
+                    <button id="processCSVBtn" class="btn btn-success" style="display: none;">Process CSV</button>
+                </div>
+                <div class="csv-info">
+                    <p><strong>CSV Format Requirements:</strong></p>
+                    <ul>
+                        <li>First columns: feature values (numerical)</li>
+                        <li>Last column: class labels (0, 1, 2, ...)</li>
+                        <li>Header row recommended but optional</li>
+                        <li>Example: x0,x1,x2,label → 1.5,2.3,4.1,0</li>
+                    </ul>
+                    <p><strong>Drift Parameters:</strong></p>
+                    <div class="csv-drift-params">
+                        <div class="form-group">
+                            <label for="csv_drift_point">Drift Point (row index):</label>
+                            <input type="number" id="csv_drift_point" value="400" min="0">
+                        </div>
+                        <div class="form-group">
+                            <label for="csv_drift_width">Drift Width (rows):</label>
+                            <input type="number" id="csv_drift_width" value="200" min="10">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div id="status" class="status-message"></div>
+            <div id="batchInfo" class="batch-info"></div>
+        </div>
+
+        <div id="resultsSection" class="results-section" style="display: none;">
+            <h2>Analysis Results</h2>
+
+            <div class="comparison-section">
+                <h3>Algorithm Comparison</h3>
+                <div id="comparisonPlot" class="plot-container"></div>
+            </div>
+
+            <div class="algorithms-grid">
+                <div class="algorithm-panel adwin-panel">
+                    <h3>🔵 ADWIN Results</h3>
+                    <div id="adwinStats" class="stats-panel"></div>
+                    <div id="adwinPlot" class="plot-container"></div>
+                    <div id="adwinBatches" class="batches-container"></div>
+                </div>
+
+                <div class="algorithm-panel pagehinkley-panel">
+                    <h3>🟣 Page-Hinkley Results</h3>
+                    <div id="pageHinkleyStats" class="stats-panel"></div>
+                    <div id="pageHinkleyPlot" class="plot-container"></div>
+                    <div id="pageHinkleyBatches" class="batches-container"></div>
+                </div>
+
+                <div class="algorithm-panel kswin-panel">
+                    <h3>🟠 KSWIN Results</h3>
+                    <div id="kswinStats" class="stats-panel"></div>
+                    <div id="kswinPlot" class="plot-container"></div>
+                    <div id="kswinBatches" class="batches-container"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>

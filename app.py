@@ -199,63 +199,79 @@ class DriftStreamGenerator:
         return np.array(data), np.array(labels), np.array(indices)
 
 def run_batch_drift_detection(data, labels, detector_type, batch_size):
-    """Run drift detection on batches with a specific detector"""
+    """Run drift detection on batches with a specific detector and reset classifier on drift."""
     if detector_type == 'ADWIN':
         detector = ADWIN()
     elif detector_type == 'PageHinkley':
         detector = PageHinkley()
     else:
         detector = KSWIN()
-    
+
     classifier = tree.HoeffdingTreeClassifier()
-    
+
     batch_results = []
     alarms = []
     accuracies = []
     error_rates = []
-    
+
     correct = 0
     total = 0
-    
+
+    # Rolling stats for normalization
+    running_mean = None
+    running_var = None
+    alpha = 0.01  # EMA smoothing factor
+
     num_batches = len(data) // batch_size + (1 if len(data) % batch_size != 0 else 0)
-    
+
     for batch_idx in range(num_batches):
         start_idx = batch_idx * batch_size
         end_idx = min((batch_idx + 1) * batch_size, len(data))
-        
+
         batch_data = data[start_idx:end_idx]
         batch_labels = labels[start_idx:end_idx]
-        
+
         batch_correct = 0
         batch_alarms = []
-        
+
         for i, (x, y) in enumerate(zip(batch_data, batch_labels)):
             x_dict = {f"x{j}": float(x[j]) for j in range(len(x))}
+
             y_pred = classifier.predict_one(x_dict)
-            
-            error = int(y_pred != y)
-            detector.update(error)
-            
-            total += 1
             if y_pred == y:
                 correct += 1
                 batch_correct += 1
-            
-            change_detected = False
-            if hasattr(detector, "change_detected"):
-                change_detected = detector.change_detected
-            elif hasattr(detector, "drift_detected"):
-                change_detected = detector.drift_detected
-            
-            if change_detected:
+                error = 0
+            else:
+                error = 1
+
+            total += 1
+            error_rates.append(error)
+            accuracies.append(correct / total)
+
+            # Compute normalized signal using EMA
+            signal = float(np.mean(x))
+            if running_mean is None:
+                running_mean = signal
+                running_var = 1.0
+            else:
+                running_mean = (1 - alpha) * running_mean + alpha * signal
+                running_var = (1 - alpha) * running_var + alpha * (signal - running_mean) ** 2
+
+            std = max(np.sqrt(running_var), 1e-6)
+            normalized = abs(signal - running_mean) / std
+
+            detector.update(float(normalized))
+
+            drift_detected = detector.drift_detected
+
+            if drift_detected:
                 alarms.append(start_idx + i)
                 batch_alarms.append(i)
-            
-            accuracies.append(correct / total)
-            error_rates.append(error)
-            
+                classifier = tree.HoeffdingTreeClassifier()
+
             classifier.learn_one(x_dict, int(y))
-        
+
         batch_accuracy = batch_correct / len(batch_data) if len(batch_data) > 0 else 0
         batch_results.append({
             'batch_number': batch_idx + 1,
@@ -266,7 +282,7 @@ def run_batch_drift_detection(data, labels, detector_type, batch_size):
             'alarms_in_batch': len(batch_alarms),
             'alarm_indices': batch_alarms
         })
-    
+
     return {
         'detector': detector_type,
         'batch_results': batch_results,
@@ -275,8 +291,46 @@ def run_batch_drift_detection(data, labels, detector_type, batch_size):
         'accuracies': accuracies,
         'error_rates': error_rates,
         'final_accuracy': accuracies[-1] if accuracies else 0,
-        'avg_accuracy': np.mean(accuracies) if accuracies else 0
+        'avg_accuracy': float(np.mean(accuracies)) if accuracies else 0
     }
+
+def compute_drift_metrics(alarm_positions, drift_point, drift_width):
+    """
+    Compute precision, recall, F1-score, and detection delay.
+    Alarms within a tolerance window around the drift are counted as TP.
+    """
+    drift_start = drift_point
+    drift_end = drift_point + drift_width
+
+    # Allow detection from the very start up to drift_end + tolerance (late detection)
+    tolerance = drift_width
+    window_start = 0
+    window_end = drift_end + tolerance
+
+    in_drift_alarms = [a for a in alarm_positions if window_start <= a <= window_end]
+    out_of_drift_alarms = [a for a in alarm_positions if a > window_end]
+
+    TP = 1 if len(in_drift_alarms) > 0 else 0
+    FP = len(out_of_drift_alarms)
+    FN = 0 if TP == 1 else 1
+
+    precision = TP / (TP + FP) if (TP + FP) > 0 else 0.0
+    recall = TP / (TP + FN) if (TP + FN) > 0 else 0.0
+    f1_score = 2 * precision * recall / (precision + recall) if (precision + recall) > 0 else 0.0
+
+    # Detection delay: positive = detected after drift, negative = detected early
+    if TP == 1:
+        delay = min(in_drift_alarms) - drift_start
+    else:
+        delay = None
+
+    return {
+        "precision": precision,
+        "recall": recall,
+        "f1_score": f1_score,
+        "delay": delay
+    }
+
 
 def create_detector_plot(result, stream_params, detector_name):
     """Create visualization for a specific detector"""
@@ -442,6 +496,13 @@ def analyze_drift():
         
         for detector_name in detectors:
             result = run_batch_drift_detection(data, labels, detector_name, batch_size)
+            
+            metrics = compute_drift_metrics(
+        alarm_positions=result["alarm_positions"],
+        drift_point=stream_params["drift_point"],
+        drift_width=stream_params["drift_width"]
+            )
+            result["metrics"] = metrics
             results[detector_name] = result
         
         detector_plots = {}
@@ -459,7 +520,8 @@ def analyze_drift():
                 'total_alarms': result['total_alarms'],
                 'alarm_positions': result['alarm_positions'],
                 'final_accuracy': result['final_accuracy'],
-                'avg_accuracy': result['avg_accuracy']
+                'avg_accuracy': result['avg_accuracy'],
+                'metrics': result['metrics']
             }
         
         return jsonify({
@@ -481,4 +543,5 @@ def analyze_drift():
 
 if __name__ == '__main__':
     os.makedirs('static', exist_ok=True)
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get('PORT', 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
